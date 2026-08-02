@@ -1,0 +1,11 @@
+{
+  "name": "gammon",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Backgammon in the browser: random dice, full rule enforcement, and a move log. No engine.",
+  "scripts": {
+    "start": "node scripts/serve.js",
+    "test": "node --test test/*.test.js"
+  }
+}

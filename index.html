@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Gammon</title>
+    <meta
+      name="description"
+      content="Two-player backgammon with random dice, enforced rules, and a move log."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%231d4a39'/%3E%3Cpath d='M6 5h7l-3.5 13z' fill='%23e0c9a6'/%3E%3Cpath d='M19 5h7l-3.5 13z' fill='%23b4573c'/%3E%3Cpath d='M6 27h7l-3.5-13z' fill='%23b4573c'/%3E%3Cpath d='M19 27h7l-3.5-13z' fill='%23e0c9a6'/%3E%3C/svg%3E"
+    />
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="topbar">
+        <h1>Gammon</h1>
+        <div class="topbar-actions">
+          <label class="cpu-toggle" id="cpu-toggle" hidden>
+            <input type="checkbox" id="cpu-black" />
+            <span>Black: <span id="engine-name">engine</span></span>
+          </label>
+          <button type="button" class="btn ghost" id="new-game">New game</button>
+        </div>
+      </header>
+
+      <main class="layout">
+        <section class="table">
+          <div class="rail" id="rail-top" aria-hidden="true"></div>
+          <div class="board" id="board"></div>
+          <div class="rail" id="rail-bottom" aria-hidden="true"></div>
+          <p class="rail-note" id="rail-note"></p>
+        </section>
+
+        <aside class="panel">
+          <div class="card">
+            <div class="scores">
+              <div class="score" id="score-white">
+                <span class="chip white"></span>
+                <span class="who">White</span>
+                <span class="pips"><b>167</b> pips</span>
+                <span class="borne" hidden></span>
+              </div>
+              <div class="score" id="score-black">
+                <span class="chip black"></span>
+                <span class="who">Black</span>
+                <span class="pips"><b>167</b> pips</span>
+                <span class="borne" hidden></span>
+              </div>
+            </div>
+
+            <div class="dice" id="dice"></div>
+            <p class="status" id="status">Roll to see who starts.</p>
+
+            <div class="controls">
+              <button type="button" class="btn primary" id="roll">Roll</button>
+              <button type="button" class="btn" id="undo">Undo</button>
+              <button type="button" class="btn" id="done">Done</button>
+            </div>
+            <p class="hint">
+              <kbd>R</kbd> roll · <kbd>U</kbd> undo · <kbd>Enter</kbd> done ·
+              <kbd>Esc</kbd> deselect
+            </p>
+          </div>
+
+          <div class="card log-card">
+            <div class="log-head">
+              <h2>Moves</h2>
+              <button type="button" class="btn tiny ghost" id="copy-log">Copy</button>
+            </div>
+            <ol class="log" id="log">
+              <li class="empty">No moves yet.</li>
+            </ol>
+          </div>
+        </aside>
+      </main>
+    </div>
+
+    <script type="module" src="src/ui.js"></script>
+  </body>
+</html>
