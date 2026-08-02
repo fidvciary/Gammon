@@ -3,9 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Backgammon in the browser: random dice, full rule enforcement, and a move log. No engine.",
+  "description": "Backgammon in the browser: neural-net engine, full rule enforcement, roll analysis, and a luck meter.",
   "scripts": {
     "start": "node scripts/serve.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "train": "node scripts/train.js",
+    "benchmark": "node scripts/benchmark.js"
   }
 }

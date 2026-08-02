@@ -1,6 +1,7 @@
 /**
- * Board, dice, and move log. All rules live in game.js — this file only
- * renders a state and turns clicks into legal moves.
+ * Board, dice, move log, and the analysis side: rolls table, luck meter,
+ * and the engine card. All rules live in game.js; all evaluation lives in
+ * engine/fathom.js. This file renders state and turns clicks into moves.
  */
 
 import {
@@ -25,6 +26,19 @@ import {
 } from './game.js';
 import { notateMoves } from './notation.js';
 import { getEngine, onEngineRegistered } from './engine.js';
+import {
+  evaluate,
+  analyzeRolls,
+  luckOf,
+  hint as engineHint,
+  engine as fathom,
+} from './engine/fathom.js';
+import {
+  emptyLuckLog,
+  recordLuck,
+  luckSummary,
+  reviveLuckLog,
+} from './luck.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,19 +54,33 @@ const undoBtn = $('undo');
 const doneBtn = $('done');
 const newGameBtn = $('new-game');
 const copyBtn = $('copy-log');
-const cpuToggle = $('cpu-toggle');
-const cpuBlack = $('cpu-black');
-const engineName = $('engine-name');
+const rollsEl = $('rolls');
+const rollsContext = $('rolls-context');
+const luckChartEl = $('luck-chart');
+const engineNameEl = $('engine-name');
+const engineDescEl = $('engine-desc');
+const evalbarFill = $('evalbar-fill');
+const evalbarNum = $('evalbar-num');
+const enginePlaysEl = $('engine-plays');
+const hintBtn = $('hint-btn');
+const hintOut = $('hint-out');
 
 const STORAGE_KEY = 'gammon.state.v1';
 
-let state = load() || newGame();
-let selected = null; // relative point (or BAR) the player has picked up
-let dieFilter = null; // restrict moves to this die value
-let lastMove = null; // for the landing animation
-let moves = []; // legal moves for the current state
-let busy = false; // an engine is playing; ignore input
+let state;
+let luckLog;
+let enginePlays = 'off'; // off | white | black | both
+let selected = null;
+let dieFilter = null;
+let lastMove = null;
+let moves = [];
+let busy = false;
+let engineToken = 0;
 let checkerSize = 28;
+let delays = { roll: 600, move: 450 };
+let hintShown = null;
+
+load();
 
 /* ---------------------------------------------------------------- build */
 
@@ -60,7 +88,6 @@ const pointEls = new Array(25);
 const barEls = {};
 const trayEls = {};
 
-/** Which grid cell an absolute point sits in. Point 1 is bottom right. */
 function cellFor(abs) {
   if (abs >= 13) return { row: 1, col: abs <= 18 ? abs - 12 : abs - 11 };
   return { row: 2, col: abs >= 7 ? 13 - abs : 14 - abs };
@@ -75,7 +102,6 @@ function el(tag, className, parent) {
 
 function buildBoard() {
   boardEl.textContent = '';
-
   for (let abs = 1; abs <= 24; abs += 1) {
     const { row, col } = cellFor(abs);
     const point = el('div', `point ${row === 1 ? 'top' : 'bottom'}`, boardEl);
@@ -87,9 +113,6 @@ function buildBoard() {
     el('div', 'stack', point);
     pointEls[abs] = point;
   }
-
-  // White enters from the bar into the top right quadrant, Black into the
-  // bottom right, so each side waits on the half it is heading for.
   const bar = el('div', 'bar', boardEl);
   for (const [player, half] of [
     [WHITE, 'top'],
@@ -99,7 +122,6 @@ function buildBoard() {
     node.dataset.bar = String(player);
     barEls[player] = node;
   }
-
   for (const [player, half] of [
     [BLACK, 'top'],
     [WHITE, 'bottom'],
@@ -109,7 +131,6 @@ function buildBoard() {
     el('div', 'tray-count', tray);
     trayEls[player] = tray;
   }
-
   for (const rail of [railTop, railBottom]) {
     rail.textContent = '';
     for (let col = 1; col <= 14; col += 1) el('span', null, rail);
@@ -131,7 +152,6 @@ function measure() {
   return true;
 }
 
-/** Stack `count` checkers along `extent` px, overlapping only when needed. */
 function stackStep(count, extent) {
   if (count < 2) return 0;
   return Math.min(checkerSize, Math.max(2, (extent - checkerSize) / (count - 1)));
@@ -150,6 +170,77 @@ function fillStack(stack, player, count, { fromTop, selectedTop, movable, landed
     if (top && movable) checker.classList.add('movable');
     if (top && landed) checker.classList.add('just-moved');
   }
+}
+
+/* ------------------------------------------------------------- analysis */
+
+/**
+ * The rolls table is always computed for the position the dice are (or are
+ * about to be) thrown at: the live position before rolling, the turn-start
+ * position while moving. Cached until that position changes.
+ */
+let analysisCache = { key: null, data: null };
+
+function preRollState() {
+  if (state.phase === 'roll' || state.phase === 'opening') return state;
+  if (state.phase === 'move') {
+    return {
+      ...state,
+      board: state.turnStart.board,
+      bar: state.turnStart.bar,
+      off: state.turnStart.off,
+    };
+  }
+  return null;
+}
+
+function analysisKey(pre) {
+  return [
+    state.phase === 'move' ? 'move' : state.phase,
+    state.turn,
+    pre.board.join(','),
+    pre.bar[1],
+    pre.bar[-1],
+  ].join('|');
+}
+
+function getAnalysis() {
+  const pre = preRollState();
+  if (!pre) return null;
+  const key = analysisKey(pre);
+  if (analysisCache.key !== key) {
+    analysisCache = {
+      key,
+      data: analyzeRolls(pre, { opening: state.phase === 'opening' }),
+    };
+  }
+  return analysisCache.data;
+}
+
+/** Record the throw that just happened, exactly once. */
+function recordRollLuck(analysis) {
+  if (state.phase !== 'move' || !analysis) return;
+  const turn = state.history.length + 1;
+  const last = luckLog.entries[luckLog.entries.length - 1];
+  if (last && last.turn === turn) return;
+  const result = luckOf(analysis, state.roll);
+  if (!result) return;
+  luckLog = recordLuck(luckLog, {
+    turn,
+    player: state.turn,
+    roll: state.roll,
+    luck: result.luck,
+    rank: result.entry.rank,
+    outOf: analysis.rolls.length,
+  });
+}
+
+/** Roll for whoever is on turn, pricing the throw against the alternatives. */
+function doRoll() {
+  const analysis = getAnalysis();
+  lastMove = null;
+  state = state.phase === 'opening' ? rollOpening(state) : roll(state);
+  recordRollLuck(analysis);
 }
 
 /* --------------------------------------------------------------- render */
@@ -176,6 +267,9 @@ function render() {
   renderStatus();
   renderControls();
   renderLog();
+  renderRolls();
+  renderLuck();
+  renderEngine();
 }
 
 function renderRails(persp) {
@@ -214,8 +308,6 @@ function renderPoints(avail) {
     const extent = stack.clientHeight || checkerSize * 5;
 
     if (targets.length) {
-      // Put the drop marker where the checker will come to rest. A checker
-      // that hits lands on the bottom of an otherwise empty point.
       const landing = targets.some((m) => m.hit) ? 0 : Math.abs(value);
       point.style.setProperty(
         '--drop',
@@ -262,7 +354,6 @@ function renderTrays(avail) {
     tray.querySelectorAll('.slab').forEach((n) => n.remove());
     const fromTop = player === BLACK;
     const slabH = Math.max(4, Math.round(checkerSize * 0.3));
-    // Keep the far end of the tray clear for the "n off" label.
     const extent = tray.clientHeight - 34;
     const step =
       count > 1 ? Math.min(slabH + 2, Math.max(2, (extent - slabH) / (count - 1))) : 0;
@@ -320,11 +411,12 @@ const PIP_CELLS = {
   ],
 };
 
-function dieNode(value, player, { used = false, pickable = false, picked = false } = {}) {
+function dieNode(value, player, opts = {}) {
   const die = el('div', `die${player === BLACK ? ' dark' : ''}`);
-  if (used) die.classList.add('used');
-  if (pickable) die.classList.add('pickable');
-  if (picked) die.classList.add('picked');
+  if (opts.mini) die.classList.add('mini');
+  if (opts.used) die.classList.add('used');
+  if (opts.pickable) die.classList.add('pickable');
+  if (opts.picked) die.classList.add('picked');
   die.dataset.die = String(value);
   for (const [row, col] of PIP_CELLS[value]) {
     const pip = el('div', 'pip', die);
@@ -336,12 +428,10 @@ function dieNode(value, player, { used = false, pickable = false, picked = false
 
 function renderDice() {
   diceEl.textContent = '';
-
   if (state.phase === 'opening') {
     if (!state.openingRoll) return;
     for (const player of [WHITE, BLACK]) {
-      const wrap = el('div', 'die-pair', diceEl);
-      wrap.append(dieNode(state.openingRoll[player], player));
+      diceEl.append(dieNode(state.openingRoll[player], player));
     }
     return;
   }
@@ -373,7 +463,6 @@ function statusHtml() {
       ? `Both rolled ${state.openingRoll[WHITE]} — roll again.`
       : 'Roll to see who goes first.';
   }
-
   if (state.phase === 'over') {
     const { winner, type, points } = state.result;
     const label =
@@ -392,15 +481,12 @@ function statusHtml() {
       : '';
 
   if (state.phase === 'roll') return `${opening}${who} to roll.`;
-
   if (state.playLength === 0) {
     return `${opening}${who} cannot move. Press Done to pass.`;
   }
   const left = state.playLength - state.played.length;
   if (left === 0) return `${who} has played the roll. Press Done.`;
-  if (state.bar[state.turn] > 0) {
-    return `${who} must enter from the bar.`;
-  }
+  if (state.bar[state.turn] > 0) return `${who} must enter from the bar.`;
   const forced = state.mustUseDie
     ? ` Only the higher die (${state.mustUseDie}) can be played.`
     : '';
@@ -408,17 +494,45 @@ function statusHtml() {
 }
 
 function renderControls() {
-  const canRoll = !busy && (state.phase === 'opening' || state.phase === 'roll');
+  const engineTurn = enginePlaysTurn();
+  const canRoll =
+    !busy && !engineTurn && (state.phase === 'opening' || state.phase === 'roll');
   rollBtn.disabled = !canRoll;
   rollBtn.classList.toggle('ready', canRoll);
 
-  undoBtn.disabled = busy || state.phase !== 'move' || state.played.length === 0;
+  undoBtn.disabled =
+    busy || engineTurn || state.phase !== 'move' || state.played.length === 0;
 
-  const done = !busy && canEndTurn(state);
+  const done = !busy && !engineTurn && canEndTurn(state);
   doneBtn.disabled = !done;
   doneBtn.classList.toggle('ready', done);
   doneBtn.textContent =
     state.phase === 'move' && state.playLength === 0 ? 'Pass' : 'Done';
+
+  hintBtn.disabled =
+    busy || engineTurn || state.phase !== 'move' || !legalMoves(state).length;
+  hintOut.textContent = hintShown || '';
+}
+
+function fmtEq(v, digits = 2) {
+  const abs = Math.abs(v).toFixed(digits);
+  if (Number(abs) === 0) return abs; // an honest zero, no sign
+  return `${v > 0 ? '+' : '−'}${abs}`;
+}
+
+/** Polarity class for a value at display precision; zero stays neutral. */
+function luckClass(v, digits = 2) {
+  if (Number(Math.abs(v).toFixed(digits)) === 0) return '';
+  return v > 0 ? 'luck-pos' : 'luck-neg';
+}
+
+function luckBadge(luck) {
+  const span = el('span', 'luck-badge luck-num');
+  const cls = luckClass(luck);
+  if (cls) span.classList.add(cls);
+  span.textContent = fmtEq(luck);
+  span.title = 'Luck of this roll (equity vs the average roll)';
+  return span;
 }
 
 function logRow(index, player, roll, text, extra = '') {
@@ -435,21 +549,24 @@ function logRow(index, player, roll, text, extra = '') {
 
 function renderLog() {
   logEl.textContent = '';
+  const luckByTurn = new Map(luckLog.entries.map((e) => [e.turn, e]));
   for (const entry of state.history) {
-    logEl.append(
-      logRow(entry.index, entry.player, entry.roll, notateMoves(entry.moves)),
-    );
+    const li = logRow(entry.index, entry.player, entry.roll, notateMoves(entry.moves));
+    const luck = luckByTurn.get(entry.index);
+    if (luck) li.append(luckBadge(luck.luck));
+    logEl.append(li);
   }
   if (state.phase === 'move') {
-    logEl.append(
-      logRow(
-        state.history.length + 1,
-        state.turn,
-        state.roll,
-        state.played.length ? notateMoves(state.played) : '…',
-        'current',
-      ),
+    const li = logRow(
+      state.history.length + 1,
+      state.turn,
+      state.roll,
+      state.played.length ? notateMoves(state.played) : '…',
+      'current',
     );
+    const luck = luckByTurn.get(state.history.length + 1);
+    if (luck) li.append(luckBadge(luck.luck));
+    logEl.append(li);
   }
   if (state.phase === 'over') {
     const li = el('li', 'result');
@@ -466,12 +583,250 @@ function renderLog() {
   logEl.scrollTop = logEl.scrollHeight;
 }
 
+/* ------------------------------------------------------- rolls panel */
+
+function renderRolls() {
+  rollsEl.textContent = '';
+
+  if (state.phase === 'over') {
+    rollsContext.textContent = 'game over';
+    const li = el('li', 'empty', rollsEl);
+    li.textContent = 'No more rolls to price.';
+    return;
+  }
+
+  const analysis = getAnalysis();
+  if (!analysis) return;
+
+  const player = analysis.player;
+  const actual =
+    state.phase === 'move'
+      ? [Math.max(state.roll[0], state.roll[1]), Math.min(state.roll[0], state.roll[1])]
+      : null;
+
+  if (state.phase === 'opening') {
+    rollsContext.textContent = 'opening throw (doubles rethrown)';
+  } else if (actual) {
+    const entry = analysis.rolls.find(
+      (r) => r.dice[0] === actual[0] && r.dice[1] === actual[1],
+    );
+    rollsContext.textContent = `${playerName(player)} rolled ${actual[0]}-${
+      actual[1]
+    } — rank ${entry.rank}/${analysis.rolls.length}`;
+  } else {
+    rollsContext.textContent = `if ${playerName(player)} rolls…`;
+  }
+
+  const maxDelta = Math.max(
+    1e-9,
+    ...analysis.rolls.map((r) => Math.abs(r.delta)),
+  );
+
+  for (const r of analysis.rolls) {
+    const li = el('li', null, rollsEl);
+    if (r === analysis.median) li.classList.add('median-row');
+    const isActual = actual && r.dice[0] === actual[0] && r.dice[1] === actual[1];
+    if (isActual) li.classList.add('rolled');
+    li.title = `${r.dice[0]}-${r.dice[1]}: best ${r.notation} (${fmtEq(r.eq, 3)})`;
+
+    const rank = el('span', 'rank', li);
+    rank.textContent = String(r.rank);
+
+    const dice = el('span', 'dice-mini', li);
+    dice.append(
+      dieNode(r.dice[0], player, { mini: true }),
+      dieNode(r.dice[1], player, { mini: true }),
+    );
+
+    const eq = el('span', 'eq luck-num', li);
+    eq.textContent = fmtEq(r.eq);
+
+    const delta = el('span', 'delta', li);
+    const fill = el('span', `fill ${r.delta >= 0 ? 'pos' : 'neg'}`, delta);
+    fill.style.width = `${(Math.abs(r.delta) / maxDelta) * 50}%`;
+
+    const tag = el('span', 'tag', li);
+    if (isActual) {
+      const luck = r.eq - analysis.mean;
+      tag.textContent = fmtEq(luck);
+      tag.classList.add('luck-num');
+      const cls = luckClass(luck);
+      if (cls) tag.classList.add(cls);
+      tag.title = 'Luck: equity vs the average roll';
+    } else if (r === analysis.median) {
+      tag.textContent = 'median';
+    }
+  }
+}
+
+/* --------------------------------------------------------- luck panel */
+
+function renderLuckSide(id, side) {
+  const node = $(id);
+  node.querySelector('.total').textContent = fmtEq(side.total);
+  node.querySelector('.total').className = `total luck-num ${luckClass(side.total)}`;
+  node.querySelector('.per').textContent = side.count
+    ? `avg ${fmtEq(side.avg)} · ${side.count} roll${side.count > 1 ? 's' : ''}`
+    : 'no rolls yet';
+}
+
+function renderLuck() {
+  const summary = luckSummary(luckLog);
+  renderLuckSide('luck-white', summary.white);
+  renderLuckSide('luck-black', summary.black);
+  drawLuckChart(summary);
+}
+
+function drawLuckChart(summary) {
+  const { series } = summary;
+  luckChartEl.textContent = '';
+  if (series.length < 2) {
+    const p = el('p', 'luck-empty', luckChartEl);
+    p.textContent = 'The luck lines appear after a few rolls.';
+    return;
+  }
+
+  const W = 264;
+  const H = 116;
+  const pad = { l: 30, r: 20, t: 8, b: 12 };
+  const iw = W - pad.l - pad.r;
+  const ih = H - pad.t - pad.b;
+
+  let lo = 0;
+  let hi = 0;
+  for (const p of series) {
+    lo = Math.min(lo, p.cumWhite, p.cumBlack);
+    hi = Math.max(hi, p.cumWhite, p.cumBlack);
+  }
+  const span = Math.max(0.2, hi - lo);
+  lo -= span * 0.08;
+  hi += span * 0.08;
+
+  const x = (i) => pad.l + (i / (series.length - 1)) * iw;
+  const y = (v) => pad.t + ((hi - v) / (hi - lo)) * ih;
+
+  const pts = (key) =>
+    series.map((p, i) => `${x(i).toFixed(1)},${y(p[key]).toFixed(1)}`).join(' ');
+
+  const svgNS = 'http://www.w3.org/2000/svg';
+  const svg = document.createElementNS(svgNS, 'svg');
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+
+  const mk = (tag, attrs, parent = svg) => {
+    const node = document.createElementNS(svgNS, tag);
+    for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+    parent.append(node);
+    return node;
+  };
+
+  // Recessive frame: a zero line and min/max gridlines with tick labels.
+  mk('line', { class: 'zero', x1: pad.l, x2: W - pad.r, y1: y(0), y2: y(0) });
+  const t0 = mk('text', { class: 'tick-label', x: pad.l - 4, y: y(0) + 3, 'text-anchor': 'end' });
+  t0.textContent = '0';
+
+  for (const line of [
+    { key: 'cumWhite', cls: 'white' },
+    { key: 'cumBlack', cls: 'black' },
+  ]) {
+    mk('polyline', { class: `line ${line.cls}`, points: pts(line.key) });
+  }
+
+  // The highs and lows: mark each side's running peak and trough.
+  for (const [key, cls] of [
+    ['cumWhite', 'white'],
+    ['cumBlack', 'black'],
+  ]) {
+    let iMax = 0;
+    let iMin = 0;
+    series.forEach((p, i) => {
+      if (p[key] > series[iMax][key]) iMax = i;
+      if (p[key] < series[iMin][key]) iMin = i;
+    });
+    for (const i of new Set([iMax, iMin])) {
+      mk('circle', {
+        class: `extreme ${cls}`,
+        cx: x(i).toFixed(1),
+        cy: y(series[i][key]).toFixed(1),
+        r: 3.5,
+      });
+    }
+    const last = series[series.length - 1];
+    const label = mk('text', {
+      class: 'end-label',
+      x: W - pad.r + 3,
+      y: (y(last[key]) + 3).toFixed(1),
+    });
+    label.textContent = cls === 'white' ? 'W' : 'B';
+  }
+
+  luckChartEl.append(svg);
+
+  const legend = el('div', 'luck-legend', luckChartEl);
+  for (const [cls, name] of [
+    ['white', 'White'],
+    ['black', 'Black'],
+  ]) {
+    const item = el('span', null, legend);
+    el('span', `swatch ${cls}`, item);
+    item.append(name);
+  }
+
+  // Hover: nearest roll event, both totals.
+  const tip = el('div', 'luck-tip', luckChartEl);
+  svg.addEventListener('mousemove', (event) => {
+    const rect = svg.getBoundingClientRect();
+    const fx = ((event.clientX - rect.left) / rect.width) * W;
+    const i = Math.max(
+      0,
+      Math.min(series.length - 1, Math.round(((fx - pad.l) / iw) * (series.length - 1))),
+    );
+    const p = series[i];
+    const e = luckLog.entries[i];
+    tip.innerHTML =
+      `<b>${playerName(e.player)}</b> rolled ${e.roll[0]}-${e.roll[1]} ` +
+      `(rank ${e.rank}/${e.outOf})<br>` +
+      `luck <b class="${luckClass(e.luck)}">${fmtEq(e.luck)}</b>` +
+      `<br>totals W ${fmtEq(p.cumWhite)} · B ${fmtEq(p.cumBlack)}`;
+    tip.style.left = `${(x(i) / W) * 100}%`;
+    tip.style.top = '0px';
+    tip.style.display = 'block';
+  });
+  svg.addEventListener('mouseleave', () => {
+    tip.style.display = 'none';
+  });
+}
+
+/* -------------------------------------------------------- engine card */
+
+function renderEngine() {
+  const engine = getEngine() || fathom;
+  engineNameEl.textContent = engine.name || 'Engine';
+  engineDescEl.textContent = busy
+    ? 'thinking…'
+    : engine.description || '';
+
+  const eq = evaluate(state);
+  const clamped = Math.max(-2, Math.min(2, eq));
+  const frac = Math.abs(clamped) / 2 / 2; // half-track at ±2
+  if (clamped >= 0) {
+    evalbarFill.className = 'evalbar-fill white';
+    evalbarFill.style.right = '50%';
+    evalbarFill.style.left = `${50 - frac * 100}%`;
+  } else {
+    evalbarFill.className = 'evalbar-fill black';
+    evalbarFill.style.left = '50%';
+    evalbarFill.style.right = `${50 - frac * 100}%`;
+  }
+  evalbarNum.textContent = fmtEq(eq);
+  evalbarNum.title = `Cubeless equity for White: ${fmtEq(eq, 3)}`;
+
+  for (const btn of enginePlaysEl.querySelectorAll('.seg')) {
+    btn.classList.toggle('on', btn.dataset.plays === enginePlays);
+  }
+}
+
 /* ---------------------------------------------------------- interaction */
 
-/**
- * When several dice reach the same square — only possible when bearing off —
- * spend the exact one first, then the smallest.
- */
 function preferred(candidates) {
   if (!candidates.length) return null;
   return [...candidates].sort((a, b) => {
@@ -483,8 +838,8 @@ function preferred(candidates) {
 
 function sync() {
   selected = null;
+  hintShown = null;
   if (state.phase === 'move') {
-    // Entering from the bar is compulsory, so pick it up for them.
     const next = legalMoves(state);
     if (state.bar[state.turn] > 0 && next.some((m) => m.from === BAR)) selected = BAR;
   } else {
@@ -506,7 +861,6 @@ function doMove(move) {
 function onPoint(abs) {
   const rel = toRel(state.turn, abs);
   const avail = availableMoves();
-
   if (selected !== null) {
     const move = preferred(avail.filter((m) => m.from === selected && m.to === rel));
     if (move) return doMove(move);
@@ -536,7 +890,7 @@ function onBar(player) {
 }
 
 boardEl.addEventListener('click', (event) => {
-  if (busy || state.phase !== 'move' || !state.turn) return;
+  if (busy || enginePlaysTurn() || state.phase !== 'move' || !state.turn) return;
   const point = event.target.closest('[data-point]');
   if (point) return onPoint(Number(point.dataset.point));
   const tray = event.target.closest('[data-tray]');
@@ -558,8 +912,7 @@ diceEl.addEventListener('click', (event) => {
 
 rollBtn.addEventListener('click', () => {
   if (rollBtn.disabled) return;
-  lastMove = null;
-  state = state.phase === 'opening' ? rollOpening(state) : roll(state);
+  doRoll();
   sync();
 });
 
@@ -582,18 +935,36 @@ newGameBtn.addEventListener('click', () => {
   if (inProgress && !window.confirm('Start a new game? The current one is lost.')) {
     return;
   }
+  engineToken += 1;
+  busy = false;
   state = newGame();
+  luckLog = emptyLuckLog();
+  analysisCache = { key: null, data: null };
   lastMove = null;
   sync();
 });
 
+hintBtn.addEventListener('click', () => {
+  if (hintBtn.disabled) return;
+  const h = engineHint(state);
+  hintShown = h ? `${h.notation}` : 'no move';
+  render();
+});
+
 copyBtn.addEventListener('click', async () => {
-  const lines = state.history.map(
-    (e) =>
-      `${e.index}. ${e.player === WHITE ? 'W' : 'B'} ${e.roll[0]}${e.roll[1]}: ${
-        notateMoves(e.moves)
-      }`,
-  );
+  const luckByTurn = new Map(luckLog.entries.map((e) => [e.turn, e]));
+  const lines = state.history.map((e) => {
+    const luck = luckByTurn.get(e.index);
+    const suffix = luck ? `  [luck ${fmtEq(luck.luck)}]` : '';
+    return `${e.index}. ${e.player === WHITE ? 'W' : 'B'} ${e.roll[0]}${e.roll[1]}: ${notateMoves(e.moves)}${suffix}`;
+  });
+  const summary = luckSummary(luckLog);
+  if (luckLog.entries.length) {
+    lines.push(
+      `Luck totals: White ${fmtEq(summary.white.total)} (avg ${fmtEq(summary.white.avg)}), ` +
+        `Black ${fmtEq(summary.black.total)} (avg ${fmtEq(summary.black.avg)})`,
+    );
+  }
   if (state.result) {
     lines.push(
       `${playerName(state.result.winner)} wins ${state.result.points} point${
@@ -620,6 +991,7 @@ window.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'r' && !rollBtn.disabled) rollBtn.click();
   else if (key === 'u' && !undoBtn.disabled) undoBtn.click();
+  else if (key === 'h' && !hintBtn.disabled) hintBtn.click();
   else if (event.key === 'Enter' && !doneBtn.disabled) doneBtn.click();
   else if (event.key === 'Escape') {
     selected = null;
@@ -633,22 +1005,44 @@ window.addEventListener('keydown', (event) => {
 
 function save() {
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ v: 2, state, luck: luckLog, plays: enginePlays }),
+    );
   } catch {
     /* private mode, quota — the game just won't survive a reload */
   }
 }
 
+function validState(saved) {
+  return (
+    saved &&
+    Array.isArray(saved.board) &&
+    saved.board.length === 25 &&
+    saved.bar &&
+    saved.off &&
+    Array.isArray(saved.history)
+  );
+}
+
 function load() {
+  state = newGame();
+  luckLog = emptyLuckLog();
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
+    if (!raw) return;
     const saved = JSON.parse(raw);
-    if (!Array.isArray(saved.board) || saved.board.length !== 25) return null;
-    if (!saved.bar || !saved.off || !Array.isArray(saved.history)) return null;
-    return saved;
+    if (saved && saved.v === 2 && validState(saved.state)) {
+      state = saved.state;
+      luckLog = reviveLuckLog(saved.luck);
+      if (['off', 'white', 'black', 'both'].includes(saved.plays)) {
+        enginePlays = saved.plays;
+      }
+    } else if (validState(saved)) {
+      state = saved; // pre-analysis save format
+    }
   } catch {
-    return null;
+    /* fall through to a fresh game */
   }
 }
 
@@ -656,66 +1050,94 @@ function load() {
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function enginePlays(player) {
-  return player === BLACK && cpuBlack.checked && Boolean(getEngine());
+function sideEnabled(player) {
+  if (enginePlays === 'both') return true;
+  if (enginePlays === 'white') return player === WHITE;
+  if (enginePlays === 'black') return player === BLACK;
+  return false;
+}
+
+function enginePlaysTurn() {
+  if (state.phase === 'opening') return enginePlays === 'both';
+  if (state.phase !== 'roll' && state.phase !== 'move') return false;
+  return sideEnabled(state.turn);
 }
 
 function scheduleEngine() {
-  if (busy || !enginePlays(state.turn)) return;
-  if (state.phase !== 'roll' && state.phase !== 'move') return;
-  setTimeout(runEngine, 500);
+  if (busy || !enginePlaysTurn()) return;
+  const token = engineToken;
+  setTimeout(() => {
+    if (token === engineToken) runEngine();
+  }, Math.min(400, delays.move));
 }
 
 async function runEngine() {
-  if (busy || !enginePlays(state.turn)) return;
+  if (busy || !enginePlaysTurn()) return;
+  const token = engineToken;
   busy = true;
   render();
   try {
-    if (state.phase === 'roll') {
-      state = roll(state);
+    if (state.phase === 'opening' || state.phase === 'roll') {
+      doRoll();
       render();
-      await wait(600);
+      await wait(delays.roll);
+      if (token !== engineToken) return;
     }
-    if (state.phase === 'move') {
+    // An opening tie leaves us still in 'opening'; try again next round.
+    if (state.phase === 'move' && sideEnabled(state.turn)) {
       const plays = legalPlays(state);
-      let choice = await getEngine().choosePlay(state, plays);
+      const engine = getEngine() || fathom;
+      let choice = await engine.choosePlay(state, plays);
+      if (token !== engineToken) return;
       if (!Array.isArray(choice)) choice = plays[0] || [];
       for (const move of choice) {
         state = applyMove(state, move);
         lastMove = move;
-        busy = false; // let render show the board mid-play
+        busy = false;
         render();
         busy = true;
-        await wait(450);
+        await wait(delays.move);
+        if (token !== engineToken) return;
       }
       if (canEndTurn(state)) state = endTurn(state);
     }
   } catch (error) {
     console.error('engine failed, handing the turn back', error);
   } finally {
-    busy = false;
-    lastMove = null;
+    if (token === engineToken) {
+      busy = false;
+      lastMove = null;
+      sync();
+    }
   }
+}
+
+enginePlaysEl.addEventListener('click', (event) => {
+  const btn = event.target.closest('.seg');
+  if (!btn) return;
+  enginePlays = btn.dataset.plays;
+  engineToken += 1;
+  busy = false;
   sync();
-}
+});
 
-function refreshEngineUI() {
-  const engine = getEngine();
-  cpuToggle.hidden = !engine;
-  if (engine) engineName.textContent = engine.name || 'engine';
-}
-
-cpuBlack.addEventListener('change', scheduleEngine);
 onEngineRegistered(() => {
-  refreshEngineUI();
+  render();
   scheduleEngine();
 });
 
 /* ----------------------------------------------------------------- boot */
 
+window.Gammon = Object.assign(window.Gammon || {}, {
+  setDelay(rollMs, moveMs = rollMs) {
+    delays = { roll: rollMs, move: moveMs };
+  },
+});
+
 buildBoard();
 measure();
-refreshEngineUI();
+// A reload mid-turn may not have priced the live roll yet.
+if (state.phase === 'move') recordRollLuck(getAnalysis());
 sync();
 
 let pending = false;

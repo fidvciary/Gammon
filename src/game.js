@@ -492,13 +492,16 @@ export function endTurn(state) {
  * ------------------------------------------------------------------ */
 
 /**
- * Every distinct legal way to play the current roll in full, each one a list
- * of moves. Sequences that shuffle the same moves into a different order are
- * collapsed. An empty list of moves means the roll cannot be played at all.
+ * Every distinct legal way to play out the rest of the current roll, each one
+ * a list of moves that can be applied to `state` as it stands. At the start
+ * of a turn that is every full play; part-way through it is the completions.
+ * Sequences that shuffle the same moves into a different order are collapsed.
+ * A single empty list means there is nothing (left) to play.
  */
 export function legalPlays(state) {
   const plays = [];
   const seen = new Set();
+  const already = state.played.length;
 
   const walk = (s) => {
     const moves = legalMoves(s);
@@ -509,7 +512,7 @@ export function legalPlays(state) {
         .join(' ')}`;
       if (!seen.has(key)) {
         seen.add(key);
-        plays.push(s.played.slice());
+        plays.push(s.played.slice(already));
       }
       return;
     }

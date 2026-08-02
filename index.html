@@ -6,7 +6,7 @@
     <title>Gammon</title>
     <meta
       name="description"
-      content="Two-player backgammon with random dice, enforced rules, and a move log."
+      content="Backgammon with a neural-net engine, full rule enforcement, roll analysis, and a luck meter."
     />
     <link
       rel="icon"
@@ -18,16 +18,42 @@
     <div class="app">
       <header class="topbar">
         <h1>Gammon</h1>
-        <div class="topbar-actions">
-          <label class="cpu-toggle" id="cpu-toggle" hidden>
-            <input type="checkbox" id="cpu-black" />
-            <span>Black: <span id="engine-name">engine</span></span>
-          </label>
-          <button type="button" class="btn ghost" id="new-game">New game</button>
-        </div>
+        <button type="button" class="btn ghost" id="new-game">New game</button>
       </header>
 
       <main class="layout">
+        <aside class="side">
+          <div class="card rolls-card">
+            <div class="card-head">
+              <h2>Rolls</h2>
+              <span class="card-sub" id="rolls-context"></span>
+            </div>
+            <ol class="rolls" id="rolls"></ol>
+          </div>
+
+          <div class="card luck-card">
+            <div class="card-head">
+              <h2>Luck</h2>
+              <span class="card-sub">equity the dice handed out</span>
+            </div>
+            <div class="luck-totals">
+              <div class="luck-side" id="luck-white">
+                <span class="chip white"></span>
+                <span class="who">White</span>
+                <b class="total">0.00</b>
+                <span class="per">avg 0.00 · 0 rolls</span>
+              </div>
+              <div class="luck-side" id="luck-black">
+                <span class="chip black"></span>
+                <span class="who">Black</span>
+                <b class="total">0.00</b>
+                <span class="per">avg 0.00 · 0 rolls</span>
+              </div>
+            </div>
+            <div class="luck-chart" id="luck-chart"></div>
+          </div>
+        </aside>
+
         <section class="table">
           <div class="rail" id="rail-top" aria-hidden="true"></div>
           <div class="board" id="board"></div>
@@ -62,8 +88,35 @@
             </div>
             <p class="hint">
               <kbd>R</kbd> roll · <kbd>U</kbd> undo · <kbd>Enter</kbd> done ·
-              <kbd>Esc</kbd> deselect
+              <kbd>H</kbd> hint · <kbd>Esc</kbd> deselect
             </p>
+          </div>
+
+          <div class="card engine-card">
+            <div class="card-head">
+              <h2 id="engine-name">Engine</h2>
+              <span class="card-sub" id="engine-desc"></span>
+            </div>
+            <div class="evalbar" id="evalbar" title="Position evaluation (cubeless equity)">
+              <span class="evalbar-side">W</span>
+              <div class="evalbar-track">
+                <div class="evalbar-fill" id="evalbar-fill"></div>
+                <div class="evalbar-zero"></div>
+              </div>
+              <span class="evalbar-side">B</span>
+              <b class="evalbar-num" id="evalbar-num">0.00</b>
+            </div>
+            <div class="engine-plays" id="engine-plays" role="group" aria-label="Engine plays">
+              <span>Plays</span>
+              <button type="button" data-plays="off" class="seg on">Off</button>
+              <button type="button" data-plays="white" class="seg">White</button>
+              <button type="button" data-plays="black" class="seg">Black</button>
+              <button type="button" data-plays="both" class="seg">Both</button>
+            </div>
+            <div class="hint-row">
+              <button type="button" class="btn tiny" id="hint-btn">Hint</button>
+              <span class="hint-out" id="hint-out"></span>
+            </div>
           </div>
 
           <div class="card log-card">

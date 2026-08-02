@@ -20,6 +20,13 @@
   --gold: #e0b866;
   --good: #7fd1a3;
 
+  /* Validated chart palette (dark surface #1e1a15):
+     series pair ΔE 21.8, polarity pair ΔE 10.0 under CVD simulation. */
+  --series-white: #b3892c;
+  --series-black: #4a9ad1;
+  --pos: #48a97b;
+  --neg: #c05038;
+
   --bar-col: 6.5%;
   --tray-col: 7.5%;
   --radius: 12px;
@@ -90,14 +97,35 @@ body {
 
 .layout {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 300px;
+  grid-template-columns: 292px minmax(0, 1fr) 300px;
   gap: 22px;
   align-items: start;
+}
+
+.side {
+  display: grid;
+  gap: 14px;
+  min-width: 0;
+}
+
+@media (max-width: 1240px) {
+  .layout {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .side {
+    order: 3;
+    grid-column: 1 / -1;
+    grid-template-columns: 1fr 1fr;
+    align-items: start;
+  }
 }
 
 @media (max-width: 900px) {
   .layout {
     grid-template-columns: minmax(0, 1fr);
+  }
+  .side {
+    grid-template-columns: 1fr;
   }
 }
 
@@ -727,4 +755,416 @@ kbd {
 .log li.result {
   color: var(--good);
   font-weight: 600;
+}
+
+.log .luck-badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ------------------------------------------------------------- card head */
+
+.card-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.card-head h2 {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.card-sub {
+  font-size: 11px;
+  color: #6f6558;
+  text-align: right;
+}
+
+/* ------------------------------------------------------------ rolls panel */
+
+.rolls {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-variant-numeric: tabular-nums;
+}
+
+.rolls li {
+  display: grid;
+  grid-template-columns: 17px 38px 44px 1fr 34px;
+  gap: 6px;
+  align-items: center;
+  padding: 1.5px 4px;
+  border-radius: 6px;
+  font-size: 12px;
+  border: 1px solid transparent;
+}
+
+.rolls li.median-row {
+  border-top: 1px dashed #4a4136;
+  border-radius: 0;
+}
+
+.rolls li.rolled {
+  background: rgba(224, 184, 102, 0.1);
+  border-color: rgba(224, 184, 102, 0.45);
+}
+
+.rolls .rank {
+  color: #6f6558;
+  font-size: 10px;
+  text-align: right;
+}
+
+.rolls .dice-mini {
+  display: flex;
+  gap: 3px;
+}
+
+.die.mini {
+  width: 16px;
+  height: 16px;
+  border-radius: 4px;
+  padding: 2px;
+  box-shadow: none;
+}
+
+.die.mini .pip {
+  width: 2.5px;
+  height: 2.5px;
+}
+
+.rolls .eq {
+  text-align: right;
+  color: var(--ink);
+  font-size: 11.5px;
+}
+
+.rolls li.rolled .eq {
+  color: var(--gold);
+}
+
+/* Δ vs the median-ranked roll: direction + validated polarity colors. */
+.rolls .delta {
+  position: relative;
+  height: 8px;
+  border-radius: 2px;
+  overflow: hidden;
+}
+
+.rolls .delta::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #4a4136;
+}
+
+.rolls .delta .fill {
+  position: absolute;
+  top: 1px;
+  bottom: 1px;
+  border-radius: 2px;
+}
+
+.rolls .delta .fill.pos {
+  left: 50%;
+  background: var(--pos);
+}
+
+.rolls .delta .fill.neg {
+  right: 50%;
+  background: var(--neg);
+}
+
+.rolls .tag {
+  font-size: 9px;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  text-align: right;
+}
+
+.rolls li.rolled .tag {
+  color: var(--gold);
+}
+
+.rolls li.empty {
+  display: block;
+  color: var(--muted);
+  font-size: 12px;
+  padding: 8px 4px;
+}
+
+.luck-num {
+  font-variant-numeric: tabular-nums;
+}
+
+.luck-pos {
+  color: var(--pos);
+}
+
+.luck-neg {
+  color: var(--neg);
+}
+
+/* ------------------------------------------------------------- luck card */
+
+.luck-totals {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.luck-side {
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+
+.luck-side .chip {
+  align-self: center;
+}
+
+.luck-side .who {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.luck-side .total {
+  font-variant-numeric: tabular-nums;
+  font-size: 14px;
+}
+
+.luck-side .per {
+  margin-left: auto;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+
+.luck-chart {
+  position: relative;
+}
+
+.luck-chart svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.luck-chart .axis {
+  stroke: #3a332a;
+  stroke-width: 1;
+}
+
+.luck-chart .zero {
+  stroke: #4a4136;
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+}
+
+.luck-chart .line {
+  fill: none;
+  stroke-width: 2;
+  stroke-linejoin: round;
+  stroke-linecap: round;
+}
+
+.luck-chart .line.white {
+  stroke: var(--series-white);
+}
+
+.luck-chart .line.black {
+  stroke: var(--series-black);
+}
+
+.luck-chart .extreme {
+  stroke: var(--card);
+  stroke-width: 1.5;
+}
+
+.luck-chart .extreme.white {
+  fill: var(--series-white);
+}
+
+.luck-chart .extreme.black {
+  fill: var(--series-black);
+}
+
+.luck-chart .end-label {
+  font-size: 10px;
+  fill: var(--muted);
+}
+
+.luck-chart .tick-label {
+  font-size: 9px;
+  fill: #6f6558;
+}
+
+.luck-empty {
+  color: var(--muted);
+  font-size: 12px;
+  padding: 6px 0 2px;
+}
+
+.luck-tip {
+  position: absolute;
+  pointer-events: none;
+  background: #2a241d;
+  border: 1px solid #3d352b;
+  border-radius: 6px;
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 1.45;
+  color: var(--ink);
+  white-space: nowrap;
+  transform: translate(-50%, -110%);
+  z-index: 10;
+  display: none;
+}
+
+.luck-legend {
+  display: flex;
+  gap: 14px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.luck-legend .swatch {
+  display: inline-block;
+  width: 14px;
+  height: 3px;
+  border-radius: 2px;
+  vertical-align: middle;
+  margin-right: 5px;
+}
+
+.luck-legend .swatch.white {
+  background: var(--series-white);
+}
+
+.luck-legend .swatch.black {
+  background: var(--series-black);
+}
+
+/* ----------------------------------------------------------- engine card */
+
+.evalbar {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-bottom: 10px;
+}
+
+.evalbar-side {
+  font-size: 10px;
+  color: var(--muted);
+}
+
+.evalbar-track {
+  position: relative;
+  flex: 1;
+  height: 10px;
+  border-radius: 5px;
+  background: #2a241d;
+  border: 1px solid #3d352b;
+  overflow: hidden;
+}
+
+.evalbar-fill {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  transition: left 0.25s ease, right 0.25s ease;
+}
+
+.evalbar-fill.white {
+  background: var(--series-white);
+  right: 50%;
+}
+
+.evalbar-fill.black {
+  background: var(--series-black);
+  left: 50%;
+}
+
+.evalbar-zero {
+  position: absolute;
+  left: 50%;
+  top: 0;
+  bottom: 0;
+  width: 1px;
+  background: #57493a;
+}
+
+.evalbar-num {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  min-width: 44px;
+  text-align: right;
+}
+
+.engine-plays {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.engine-plays span {
+  margin-right: 3px;
+}
+
+.seg {
+  font: inherit;
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 9px;
+  border-radius: 6px;
+  border: 1px solid #3d352b;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+.seg:hover {
+  background: #2a241d;
+}
+
+.seg.on {
+  background: rgba(224, 184, 102, 0.14);
+  border-color: rgba(224, 184, 102, 0.5);
+  color: var(--gold);
+}
+
+.hint-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 24px;
+}
+
+.hint-out {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  color: var(--good);
+}
+
+.thinking {
+  color: var(--muted);
+  font-style: italic;
 }
