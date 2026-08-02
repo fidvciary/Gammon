@@ -38,9 +38,11 @@ and gammon/backgammon scoring. Games save to `localStorage` after every move.
 - **`net.js` + `weights.js`** — a TD-Gammon-style neural network: 198 inputs
   (Tesauro's board encoding plus whose turn), 80 sigmoid hidden units, and
   five outputs — P(win), P(gammon win), P(backgammon win), P(gammon loss),
-  P(backgammon loss) — from which cubeless equity follows. The weights were
-  trained from scratch by `scripts/train.js`: TD(λ) self-play (λ = 0.7,
-  annealed α), a couple hundred thousand games.
+  P(backgammon loss) — from which cubeless equity follows. The shipped
+  weights were trained from scratch by `scripts/train.js`: TD(λ) self-play
+  (λ = 0.7, annealed α), 200,000 games. At 1 ply they beat pubeval 54.9%
+  with **+0.30 points per game** over a 2,000-game cubeless money session
+  (`npm run benchmark`); the app plays them at 2 ply.
 - **`board.js`** — a fast move generator over an `Int8Array` position, laid
   out to match Tesauro's `pos[]` convention. Cross-validated move-for-move
   against the reference rules engine on random games (`test/board.test.js`).
