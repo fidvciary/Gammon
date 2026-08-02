@@ -108,7 +108,7 @@
             </div>
             <p class="hint">
               <kbd>R</kbd> roll · <kbd>U</kbd> undo · <kbd>Enter</kbd> done ·
-              <kbd>H</kbd> hint · <kbd>Esc</kbd> deselect
+              <kbd>B</kbd> best play · <kbd>Esc</kbd> deselect
             </p>
           </div>
 
@@ -133,9 +133,15 @@
               <button type="button" data-plays="black" class="seg">Black</button>
               <button type="button" data-plays="both" class="seg">Both</button>
             </div>
-            <div class="hint-row">
-              <button type="button" class="btn tiny" id="hint-btn">Hint</button>
-              <span class="hint-out" id="hint-out"></span>
+            <div class="best-block">
+              <div class="best-head">
+                <span>Best play</span>
+                <button type="button" class="seg on" id="best-toggle">Shown</button>
+              </div>
+              <div class="best-body">
+                <span class="best-play" id="best-play">—</span>
+                <span class="best-eq" id="best-eq"></span>
+              </div>
             </div>
           </div>
 

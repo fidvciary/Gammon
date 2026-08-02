@@ -16,7 +16,7 @@ import {
   analyzeRolls,
   luckOf,
   choosePlay,
-  hint,
+  bestPlay,
   evaluate,
 } from '../src/engine/fathom.js';
 import { emptyLuckLog, recordLuck, luckSummary, reviveLuckLog } from '../src/luck.js';
@@ -111,23 +111,56 @@ test('choosePlay returns a full, replayable play', () => {
   }
 });
 
-test('hint offers nothing on a dead roll', () => {
+test('the best play is nothing on a dead roll', () => {
   const state = moveState(
     { white: { 13: 2 }, black: { 1: 2, 2: 2, 3: 2, 4: 2, 5: 2, 6: 2 }, whiteBar: 1 },
     WHITE,
     [6, 2],
   );
   assert.equal(state.playLength, 0);
-  assert.equal(hint(state), null);
+  assert.equal(bestPlay(state), null);
 });
 
-test('hint works mid-turn on the remaining dice', () => {
+test('the best play covers only what is left of the roll', () => {
   const state = startTurn({ ...newGame(), turn: WHITE }, [3, 1]);
-  const first = legalPlays(state)[0][0];
-  const partway = applyMove(state, first);
-  const h = hint(partway);
-  assert.ok(h);
-  assert.equal(h.moves.length, 1);
+  const whole = bestPlay(state);
+  assert.equal(whole.moves.length, 2);
+  assert.equal(whole.notation, '8/5 6/5', 'the book play for an opening 3-1');
+  assert.equal(whole.choices, legalPlays(state).length);
+
+  const partway = applyMove(state, legalPlays(state)[0][0]);
+  const rest = bestPlay(partway);
+  assert.equal(rest.moves.length, 1, 'one die still to play');
+  // Whatever it suggests must be legal from here.
+  applyMove(partway, rest.moves[0]);
+});
+
+test('the best play is replayable and reports its margin', () => {
+  for (const roll of [[6, 5], [5, 5], [2, 1]]) {
+    const state = startTurn({ ...newGame(), turn: BLACK }, roll);
+    const best = bestPlay(state);
+    assert.ok(best, `a play exists for ${roll}`);
+    assert.equal(best.moves.length, state.playLength);
+    assert.ok(Number.isFinite(best.equity));
+    assert.ok(best.choices >= 1);
+    if (best.choices > 1) {
+      assert.ok(best.margin >= 0, 'the best play is not behind the runner-up');
+    } else {
+      assert.equal(best.margin, null);
+    }
+    let s = state;
+    for (const m of best.moves) s = applyMove(s, m); // throws if illegal
+    assert.ok(canEndTurn(s));
+  }
+});
+
+test('a single legal play is reported as forced', () => {
+  // One checker, and only the higher die can be played at all.
+  const state = moveState({ white: { 13: 1 }, black: { 15: 2, 20: 2 } }, WHITE, [5, 3]);
+  const best = bestPlay(state);
+  assert.equal(best.choices, 1);
+  assert.equal(best.margin, null);
+  assert.equal(best.notation, '13/8');
 });
 
 test('evaluate stays within the equity range and flips with the winner', () => {

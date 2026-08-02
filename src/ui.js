@@ -22,6 +22,7 @@ import {
   endTurn,
   pipCount,
   toRel,
+  toAbs,
   playerName,
   diceRemaining,
   diceFromRoll,
@@ -32,7 +33,7 @@ import {
   evaluate,
   analyzeRolls,
   luckOf,
-  hint as engineHint,
+  bestPlay,
   engine as fathom,
 } from './engine/fathom.js';
 import {
@@ -64,14 +65,15 @@ const engineDescEl = $('engine-desc');
 const evalbarFill = $('evalbar-fill');
 const evalbarNum = $('evalbar-num');
 const enginePlaysEl = $('engine-plays');
-const hintBtn = $('hint-btn');
-const hintOut = $('hint-out');
 const controlsEl = $('controls');
 const diceModeEl = $('dice-mode');
 const diceEntryEl = $('dice-entry');
 const diceInput = $('dice-input');
 const diceSetBtn = $('dice-set');
 const diceNoteEl = $('dice-note');
+const bestToggle = $('best-toggle');
+const bestPlayEl = $('best-play');
+const bestEqEl = $('best-eq');
 
 const STORAGE_KEY = 'gammon.state.v1';
 
@@ -87,7 +89,7 @@ let busy = false;
 let engineToken = 0;
 let checkerSize = 28;
 let delays = { roll: 600, move: 450 };
-let hintShown = null;
+let showBest = true;
 
 load();
 
@@ -96,6 +98,8 @@ load();
 const pointEls = new Array(25);
 const barEls = {};
 const trayEls = {};
+const SVG_NS = 'http://www.w3.org/2000/svg';
+let overlayEl = null;
 
 function cellFor(abs) {
   if (abs >= 13) return { row: 1, col: abs <= 18 ? abs - 12 : abs - 11 };
@@ -144,6 +148,11 @@ function buildBoard() {
     rail.textContent = '';
     for (let col = 1; col <= 14; col += 1) el('span', null, rail);
   }
+
+  overlayEl = document.createElementNS(SVG_NS, 'svg');
+  overlayEl.setAttribute('class', 'best-overlay');
+  overlayEl.setAttribute('aria-hidden', 'true');
+  boardEl.append(overlayEl);
 }
 
 /* --------------------------------------------------------------- layout */
@@ -244,6 +253,26 @@ function recordRollLuck(analysis) {
   });
 }
 
+/**
+ * The engine's best way to play what is left of the roll. Recomputed only
+ * when the position, the dice, or how much has been played changes.
+ */
+let bestCache = { key: null, data: null };
+
+function getBest() {
+  if (state.phase !== 'move') return null;
+  const key = [
+    state.board.join(','),
+    state.bar[WHITE],
+    state.bar[BLACK],
+    state.turn,
+    String(state.roll),
+    state.played.length,
+  ].join('|');
+  if (bestCache.key !== key) bestCache = { key, data: bestPlay(state) };
+  return bestCache.data;
+}
+
 /** Roll for whoever is on turn, pricing the throw against the alternatives. */
 function doRoll() {
   const analysis = getAnalysis();
@@ -334,6 +363,7 @@ function render() {
   renderRolls();
   renderLuck();
   renderEngine();
+  renderBest();
 }
 
 function renderRails(persp) {
@@ -590,9 +620,6 @@ function renderControls() {
   doneBtn.textContent =
     state.phase === 'move' && state.playLength === 0 ? 'Pass' : 'Done';
 
-  hintBtn.disabled =
-    busy || engineTurn || state.phase !== 'move' || !legalMoves(state).length;
-  hintOut.textContent = hintShown || '';
 }
 
 function renderDiceEntry(manual) {
@@ -745,9 +772,11 @@ function renderRolls() {
       li.classList.add('pickable');
       li.dataset.roll = `${r.dice[0]}${r.dice[1]}`;
     }
-    li.title = pickable
-      ? `Play ${r.dice[0]}-${r.dice[1]} — best ${r.notation} (${fmtEq(r.eq, 3)})`
-      : `${r.dice[0]}-${r.dice[1]}: best ${r.notation} (${fmtEq(r.eq, 3)})`;
+    // 1 ply here: 21 rolls times every play is far too much work at 2 ply,
+    // so these read a touch differently from the 2-ply Best play card.
+    li.title =
+      `${pickable ? 'Play ' : ''}${r.dice[0]}-${r.dice[1]}: ` +
+      `best ${r.notation} (${fmtEq(r.eq, 3)} at 1 ply)`;
 
     const rank = el('span', 'rank', li);
     rank.textContent = String(r.rank);
@@ -945,6 +974,147 @@ function renderEngine() {
   }
 }
 
+/* ------------------------------------------------------ best play */
+
+function renderBest() {
+  bestToggle.classList.toggle('on', showBest);
+  bestToggle.textContent = showBest ? 'Shown' : 'Hidden';
+
+  if (!showBest) {
+    bestPlayEl.className = 'best-play muted';
+    bestPlayEl.textContent = 'Hidden — press B to show.';
+    bestEqEl.textContent = '';
+    drawBestOverlay(null);
+    return;
+  }
+
+  const best = state.phase === 'move' && !busy ? getBest() : null;
+  if (!best) {
+    bestPlayEl.className = 'best-play muted';
+    bestPlayEl.textContent =
+      state.phase === 'move' ? 'Nothing left to play.' : 'Waiting for the dice.';
+    bestEqEl.textContent = '';
+    drawBestOverlay(null);
+    return;
+  }
+
+  bestPlayEl.className = 'best-play';
+  bestPlayEl.textContent = best.notation;
+  bestEqEl.textContent =
+    best.margin === null || best.choices < 2
+      ? 'only play'
+      : `${fmtEq(best.equity)} · +${Math.abs(best.margin).toFixed(2)} over 2nd`;
+  bestEqEl.title =
+    `Equity ${fmtEq(best.equity, 3)} for ${playerName(state.turn)} after this play, ` +
+    `chosen from ${best.choices} legal ${best.choices === 1 ? 'play' : 'plays'}.`;
+  drawBestOverlay(best);
+}
+
+/** Where an arrow should start or end for a relative point. */
+function anchorFor(rel) {
+  const turn = state.turn;
+  const svgRect = overlayEl.getBoundingClientRect();
+  let node;
+  let middle = false;
+  if (rel === BAR) {
+    node = barEls[turn];
+    middle = true;
+  } else if (rel === OFF) {
+    node = trayEls[turn];
+    middle = true;
+  } else {
+    node = pointEls[toAbs(turn, rel)];
+  }
+  if (!node) return null;
+
+  const r = node.getBoundingClientRect();
+  const x = r.left + r.width / 2 - svgRect.left;
+  if (middle) return { x, y: r.top + r.height / 2 - svgRect.top };
+  // Sit inside the triangle rather than on the board edge.
+  const abs = toAbs(turn, rel);
+  const y =
+    abs >= 13 ? r.top + r.height * 0.32 : r.bottom - r.height * 0.32;
+  return { x, y: y - svgRect.top };
+}
+
+function svg(tag, attrs, parent = overlayEl) {
+  const node = document.createElementNS(SVG_NS, tag);
+  for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, v);
+  parent.append(node);
+  return node;
+}
+
+/**
+ * Draw the best play as arrows on the board. Identical moves collapse into
+ * one arrow carrying a count, so `13/11(2)` is a single marked arrow.
+ */
+function drawBestOverlay(best) {
+  if (!overlayEl) return;
+  overlayEl.textContent = '';
+  if (!best || !best.moves.length || !state.turn) return;
+
+  const grouped = new Map();
+  for (const move of best.moves) {
+    const key = `${move.from}>${move.to}`;
+    const seen = grouped.get(key);
+    if (seen) seen.count += 1;
+    else grouped.set(key, { move, count: 1 });
+  }
+
+  for (const { move, count } of grouped.values()) {
+    const a = anchorFor(move.from);
+    const b = anchorFor(move.to);
+    if (!a || !b) continue;
+
+    const dx = b.x - a.x;
+    const dy = b.y - a.y;
+    const len = Math.hypot(dx, dy) || 1;
+    // Bow the arrow so overlapping ones stay apart and read as paths.
+    const bow = Math.min(26, len * 0.17);
+    const cx = (a.x + b.x) / 2 - (dy / len) * bow;
+    const cy = (a.y + b.y) / 2 + (dx / len) * bow;
+
+    // Stop short of the destination so the head sits clear of the checkers.
+    const tanX = b.x - cx;
+    const tanY = b.y - cy;
+    const tanLen = Math.hypot(tanX, tanY) || 1;
+    const ux = tanX / tanLen;
+    const uy = tanY / tanLen;
+    const gap = Math.min(11, len * 0.3);
+    const tip = { x: b.x - ux * gap, y: b.y - uy * gap };
+
+    const d = `M ${a.x.toFixed(1)} ${a.y.toFixed(1)} Q ${cx.toFixed(1)} ${cy.toFixed(
+      1,
+    )} ${tip.x.toFixed(1)} ${tip.y.toFixed(1)}`;
+
+    const size = 9;
+    const wing = size * 0.55;
+    const head = [
+      `${(tip.x + ux * size).toFixed(1)},${(tip.y + uy * size).toFixed(1)}`,
+      `${(tip.x - uy * wing).toFixed(1)},${(tip.y + ux * wing).toFixed(1)}`,
+      `${(tip.x + uy * wing).toFixed(1)},${(tip.y - ux * wing).toFixed(1)}`,
+    ].join(' ');
+
+    svg('path', { class: 'halo', d });
+    svg('polygon', { class: 'head-halo', points: head });
+    svg('path', { class: 'shaft', d });
+    svg('polygon', { class: 'head', points: head });
+    svg('circle', { class: 'from-dot', cx: a.x.toFixed(1), cy: a.y.toFixed(1), r: 3.5 });
+
+    if (count > 1) {
+      const mx = 0.25 * a.x + 0.5 * cx + 0.25 * tip.x;
+      const my = 0.25 * a.y + 0.5 * cy + 0.25 * tip.y;
+      svg('circle', { class: 'count-bg', cx: mx.toFixed(1), cy: my.toFixed(1), r: 8 });
+      const label = svg('text', {
+        class: 'count-text',
+        x: mx.toFixed(1),
+        y: my.toFixed(1),
+      });
+      label.textContent = `×${count}`;
+    }
+  }
+}
+
 /* ---------------------------------------------------------- interaction */
 
 function preferred(candidates) {
@@ -958,7 +1128,6 @@ function preferred(candidates) {
 
 function sync() {
   selected = null;
-  hintShown = null;
   if (state.phase === 'move') {
     const next = legalMoves(state);
     if (state.bar[state.turn] > 0 && next.some((m) => m.from === BAR)) selected = BAR;
@@ -1119,10 +1288,9 @@ newGameBtn.addEventListener('click', () => {
   sync();
 });
 
-hintBtn.addEventListener('click', () => {
-  if (hintBtn.disabled) return;
-  const h = engineHint(state);
-  hintShown = h ? `${h.notation}` : 'no move';
+bestToggle.addEventListener('click', () => {
+  showBest = !showBest;
+  save();
   render();
 });
 
@@ -1166,7 +1334,7 @@ window.addEventListener('keydown', (event) => {
   const key = event.key.toLowerCase();
   if (key === 'r' && !rollBtn.disabled) rollBtn.click();
   else if (key === 'u' && !undoBtn.disabled) undoBtn.click();
-  else if (key === 'h' && !hintBtn.disabled) hintBtn.click();
+  else if (key === 'b') bestToggle.click();
   else if (event.key === 'Enter' && !doneBtn.disabled) doneBtn.click();
   else if (event.key === 'Escape') {
     selected = null;
@@ -1188,6 +1356,7 @@ function save() {
         luck: luckLog,
         plays: enginePlays,
         dice: diceMode,
+        best: showBest,
       }),
     );
   } catch {
@@ -1220,6 +1389,7 @@ function load() {
         enginePlays = saved.plays;
       }
       if (saved.dice === 'manual' || saved.dice === 'random') diceMode = saved.dice;
+      if (typeof saved.best === 'boolean') showBest = saved.best;
     } else if (validState(saved)) {
       state = saved; // pre-analysis save format
     }

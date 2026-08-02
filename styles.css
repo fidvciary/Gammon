@@ -27,6 +27,10 @@
   --pos: #48a97b;
   --neg: #c05038;
 
+  /* Engine advice: distinct from gold selection and green move targets,
+     and legible over felt, both point colours, and both checker colours. */
+  --advice: #cdb2ec;
+
   --bar-col: 6.5%;
   --tray-col: 7.5%;
   --radius: 12px;
@@ -1231,17 +1235,102 @@ kbd {
   color: var(--gold);
 }
 
-.hint-row {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  min-height: 24px;
+.best-block {
+  border-top: 1px solid var(--line);
+  padding-top: 9px;
 }
 
-.hint-out {
+.best-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-bottom: 5px;
+}
+
+.best-body {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-height: 20px;
+}
+
+.best-play {
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+  color: var(--advice);
+  overflow-wrap: anywhere;
+}
+
+.best-play.muted {
+  color: var(--muted);
+  font-family: inherit;
   font-size: 12px;
-  color: var(--good);
+}
+
+.best-eq {
+  margin-left: auto;
+  font-size: 11.5px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+/* -------------------------------------------------- best-play overlay */
+
+.best-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  overflow: visible;
+}
+
+.best-overlay .halo {
+  fill: none;
+  stroke: rgba(8, 20, 15, 0.85);
+  stroke-width: 5.5;
+  stroke-linecap: round;
+}
+
+.best-overlay .shaft {
+  fill: none;
+  stroke: var(--advice);
+  stroke-width: 2.5;
+  stroke-linecap: round;
+}
+
+.best-overlay .head-halo {
+  fill: rgba(8, 20, 15, 0.85);
+  stroke: rgba(8, 20, 15, 0.85);
+  stroke-width: 3;
+  stroke-linejoin: round;
+}
+
+.best-overlay .head {
+  fill: var(--advice);
+}
+
+.best-overlay .from-dot {
+  fill: var(--advice);
+  stroke: rgba(8, 20, 15, 0.85);
+  stroke-width: 1.5;
+}
+
+.best-overlay .count-bg {
+  fill: rgba(8, 20, 15, 0.9);
+  stroke: var(--advice);
+  stroke-width: 1;
+}
+
+.best-overlay .count-text {
+  fill: var(--advice);
+  font-size: 10px;
+  font-weight: 700;
+  text-anchor: middle;
+  dominant-baseline: central;
 }
 
 .thinking {

@@ -133,43 +133,64 @@ export function luckOf(analysis, roll) {
   return entry ? { luck: entry.eq - analysis.mean, entry } : null;
 }
 
-/**
- * Choose among game.js plays (full turns or the rest of a part-played turn).
- * 1-ply scores every play, then the best few are settled at 2 ply.
- */
-export function choosePlay(state, plays, { ply = 2 } = {}) {
-  if (!plays.length) return plays;
-  if (plays.length === 1) return plays[0];
-  const player = state.turn;
+/** How many 1-ply survivors get the full 2-ply treatment. */
+const CANDIDATES = 6;
 
+/**
+ * Order plays best-first for the player on turn. Every play is scored at
+ * 1 ply; the leading few are then settled at 2 ply, which is what decides
+ * the winner when 2-ply is asked for.
+ */
+function rankPlays(state, plays, ply) {
+  const player = state.turn;
   const scored = plays.map((moves) => {
     let s = state;
     for (const m of moves) s = applyMove(s, m);
     const after = fromState(s, player);
-    return { moves, after, eq: evalRel(after, player, -1) };
+    return { moves, after, eq: evalRel(after, player, -1), value: null };
   });
   scored.sort((a, b) => b.eq - a.eq);
-  if (ply < 2) return scored[0].moves;
+  if (ply < 2) return scored;
 
-  let best = scored[0];
-  let bestValue = -Infinity;
-  for (const cand of scored.slice(0, 6)) {
-    const value = twoPlyValue(cand.after, player);
-    if (value > bestValue) {
-      bestValue = value;
-      best = cand;
-    }
-  }
-  return best.moves;
+  const top = scored.slice(0, CANDIDATES);
+  for (const cand of top) cand.value = twoPlyValue(cand.after, player);
+  top.sort((a, b) => b.value - a.value);
+  return top.concat(scored.slice(CANDIDATES));
 }
 
-/** Best continuation from right now, for the hint button. */
-export function hint(state) {
+/**
+ * Choose among game.js plays (full turns or the rest of a part-played turn).
+ */
+export function choosePlay(state, plays, { ply = 2 } = {}) {
+  if (!plays.length) return plays;
+  if (plays.length === 1) return plays[0];
+  return rankPlays(state, plays, ply)[0].moves;
+}
+
+/**
+ * The best way to play what is left of the current roll, or null when there
+ * is nothing to play. `equity` is for the player on turn, and `runnerUp` is
+ * what the second-best play would cost — the price of going your own way.
+ */
+export function bestPlay(state, { ply = 2 } = {}) {
+  if (state.phase !== 'move') return null;
   const plays = legalPlays(state);
   if (!plays.length || (plays.length === 1 && !plays[0].length)) return null;
-  const moves = choosePlay(state, plays);
-  if (!Array.isArray(moves) || !moves.length) return null;
-  return { moves, notation: notateMoves(moves) };
+
+  const ranked = rankPlays(state, plays, ply);
+  const best = ranked[0];
+  const second = ranked[1];
+  const scoreOf = (c) => (c && c.value !== null ? c.value : c ? c.eq : null);
+  const bestScore = scoreOf(best);
+  const nextScore = scoreOf(second);
+
+  return {
+    moves: best.moves,
+    notation: notateMoves(best.moves),
+    equity: bestScore,
+    margin: nextScore === null ? null : bestScore - nextScore,
+    choices: plays.length,
+  };
 }
 
 export const engine = registerEngine({

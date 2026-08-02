@@ -23,7 +23,7 @@ Click a checker, then click where it goes — only legal destinations light up.
 and plays both, ties are re-thrown). **Undo** takes back checkers one at a
 time until **Done** commits the turn; Done only enables once the roll has been
 played out as fully as the rules demand. Keys: <kbd>R</kbd> roll,
-<kbd>U</kbd> undo, <kbd>Enter</kbd> done, <kbd>H</kbd> hint,
+<kbd>U</kbd> undo, <kbd>Enter</kbd> done, <kbd>B</kbd> best play,
 <kbd>Esc</kbd> deselect.
 
 Both sides are played by hand unless you hand one to the engine, so a
@@ -76,11 +76,28 @@ and gammon/backgammon scoring. Games save to `localStorage` after every move.
   backgammon-programming literature.
 - **`fathom.js`** — the engine proper: 1-ply scoring with a 2-ply expectimax
   settle among the best candidates when it plays, plus the analysis calls the
-  UI uses (`evaluate`, `analyzeRolls`, `hint`).
+  UI uses (`evaluate`, `analyzeRolls`, `bestPlay`).
 
 The engine card (right panel) shows a live evaluation bar and lets the engine
-play **White**, **Black**, **both sides**, or neither. **Hint** suggests a
-move for the human on turn, including part-way through a turn.
+play **White**, **Black**, **both sides**, or neither.
+
+### Best play
+
+As soon as there are dice on the table, the engine's best play for them is
+shown — in notation on the engine card, and **drawn on the board as arrows**,
+one per move, with a `×2` badge where the same move is made twice. Alongside
+the notation is the equity of that play for the player on turn and how much
+it beats the second-best play by, so you can see whether the choice is
+close or clear-cut. Play a checker and it re-solves for the rest of the roll,
+so it always answers "what should I do from here".
+
+Press <kbd>B</kbd> or the **Shown/Hidden** button to turn it off — worth doing
+if you want to play seriously rather than analyse. The setting is remembered.
+
+Depth note: the best play is searched at 2 ply, while the rolls table below is
+1 ply (21 rolls times every play is far too much work at 2 ply), so the two
+equities read a little differently for the same roll. Each roll's tooltip says
+which it is.
 
 Training and benchmarking (Node, no dependencies):
 
