@@ -1,8 +1,9 @@
 # Gammon
 
 Backgammon in the browser, with a neural-net engine, full rule enforcement,
-a ranked table of every possible roll, and a luck meter that prices each throw
-of the dice. No build step, no dependencies.
+a ranked table of every possible roll, a luck meter that prices each throw of
+the dice, and a skill rating that separates the two. No build step, no
+dependencies.
 
 ## Running it
 
@@ -137,6 +138,56 @@ sit above a chart of both players' running luck — its highs and lows marked �
 with a tooltip giving each throw's rank and value. Each move-log row also
 carries its roll's luck, and **Copy** exports the log with luck annotations.
 
+## The skill rating
+
+A game's outcome is two things added together — what the dice handed out, and
+what the players did with it:
+
+```
+result = luck + skill
+```
+
+The luck meter measures the first term directly, so subtracting it from the
+score leaves what was earned:
+
+```
+edge = result(White) − (White's luck − Black's luck)
+```
+
+`edge` is in points and zero-sum. A player who wins two points while the dice
+gave them exactly two points of equity has an edge of zero — the dice did it.
+Winning a single point through dice that were a point and a half against you
+is an edge of +2.5, and losing while the dice were even worse than the loss
+still comes out positive.
+
+The **Skill** panel puts that on a 0..1 scale, split between the two players
+so the pair always sums to exactly 1 — it is a share of the credit, not an
+absolute strength. **0.50 is par**: the result was precisely what the dice
+dictated. Above means a player got more out of their dice than they gave.
+
+The scale is calibrated, not guessed. `scripts/calibrate-rating.js` plays the
+engine against itself — equal skill, so the true edge is zero — and measures
+the spread of `edge` over 600 games. That spread (0.84 points) is the noise
+floor, and one noise-SD of edge is what moves the rating to 0.73. The same run
+is a check on the arithmetic: mean edge came out −0.024 against a standard
+error of 0.034, i.e. indistinguishable from the zero that two equal players
+must average. It also shows how much of backgammon is dice — luck alone
+explained **79%** of the variance in the raw result (r = 0.887); `edge` is the
+remaining fifth.
+
+Because one game is mostly noise, the rating accumulates over a run: finished
+games are kept across **New game**, the scale tightens as √games, and the
+panel says how far along it is until roughly a dozen games have been played.
+**reset** clears the run. While a game is in progress the engine's equity
+stands in for its result — equity *is* the expected final score — so the
+number moves during play and converges on the real one at the end.
+
+A caveat worth stating: this measures outcomes, not moves. It cannot tell a
+player who blundered and got away with it from one who played cleanly, only
+what the scoreboard says once the dice are accounted for. Move-by-move error
+rates (comparing each play against the engine's best) would measure skill
+directly, and would be the natural next step.
+
 ## Layout
 
 ```
@@ -146,12 +197,14 @@ src/game.js        the rules. Pure, DOM-free; the only source of legality
 src/notation.js    "13/7 8/4*" formatting
 src/ui.js          rendering and input; holds no rules of its own
 src/luck.js        the luck ledger: record, summarize, revive from storage
+src/rating.js      skill rating: result minus luck, on a 0..1 scale
 src/engine.js      engine registry (external engines can still plug in)
 src/engine/        Fathom: net, weights, movegen, pubeval, search
 scripts/serve.js   static server for npm start
 scripts/train.js   TD(λ) self-play trainer (worker threads)
 scripts/td.js      training core + pubeval match play
 scripts/benchmark.js  net vs pubeval CLI
+scripts/calibrate-rating.js  measures the rating's noise floor
 test/              node --test suites
 ```
 

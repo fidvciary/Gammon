@@ -52,6 +52,33 @@
             </div>
             <div class="luck-chart" id="luck-chart"></div>
           </div>
+
+          <div class="card skill-card">
+            <div class="card-head">
+              <h2>Skill</h2>
+              <span class="card-sub" id="skill-sub">result minus luck</span>
+              <button type="button" class="btn tiny ghost" id="skill-reset" hidden>
+                reset
+              </button>
+            </div>
+            <div class="skill-bar" id="skill-bar">
+              <div class="skill-fill" id="skill-fill"></div>
+              <div class="skill-mid"></div>
+            </div>
+            <div class="skill-sides">
+              <div class="skill-side" id="skill-white">
+                <span class="chip white"></span>
+                <span class="who">White</span>
+                <b class="rating">0.50</b>
+              </div>
+              <div class="skill-side" id="skill-black">
+                <span class="chip black"></span>
+                <span class="who">Black</span>
+                <b class="rating">0.50</b>
+              </div>
+            </div>
+            <p class="skill-note" id="skill-note"></p>
+          </div>
         </aside>
 
         <section class="table">

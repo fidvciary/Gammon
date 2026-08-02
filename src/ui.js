@@ -42,6 +42,7 @@ import {
   luckSummary,
   reviveLuckLog,
 } from './luck.js';
+import { skillRating, liveSkillRating, CONFIDENT_GAMES } from './rating.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -74,6 +75,10 @@ const diceNoteEl = $('dice-note');
 const bestToggle = $('best-toggle');
 const bestPlayEl = $('best-play');
 const bestEqEl = $('best-eq');
+const skillFill = $('skill-fill');
+const skillSub = $('skill-sub');
+const skillNote = $('skill-note');
+const skillReset = $('skill-reset');
 
 const STORAGE_KEY = 'gammon.state.v1';
 
@@ -90,6 +95,8 @@ let engineToken = 0;
 let checkerSize = 28;
 let delays = { roll: 600, move: 450 };
 let showBest = true;
+let matchHistory = { games: [] }; // finished games, for the skill rating
+let gameBanked = false; // has the game on the board been added to the run?
 
 load();
 
@@ -362,6 +369,7 @@ function render() {
   renderLog();
   renderRolls();
   renderLuck();
+  renderSkill();
   renderEngine();
   renderBest();
 }
@@ -974,6 +982,95 @@ function renderEngine() {
   }
 }
 
+/* ---------------------------------------------------------- skill rating */
+
+/** A finished game joins the run exactly once. */
+function bankFinishedGame() {
+  if (state.phase !== 'over' || gameBanked) return;
+  const summary = luckSummary(luckLog);
+  matchHistory = {
+    games: [
+      ...matchHistory.games,
+      {
+        result: state.result.points * state.winner,
+        whiteLuck: summary.white.total,
+        blackLuck: summary.black.total,
+      },
+    ],
+  };
+  gameBanked = true;
+}
+
+/**
+ * Rate the run: every finished game, plus the one on the board. A game in
+ * progress contributes the engine's equity in place of a result, which is
+ * exactly what equity is — the score the position is expected to reach.
+ */
+function currentRating() {
+  const past = matchHistory.games;
+  if (state.phase === 'over') return past.length ? skillRating(past) : null;
+  if (!luckLog.entries.length) return past.length ? skillRating(past) : null;
+
+  const summary = luckSummary(luckLog);
+  const live = {
+    result: evaluate(state),
+    whiteLuck: summary.white.total,
+    blackLuck: summary.black.total,
+  };
+  if (!past.length) return liveSkillRating(live);
+  const rated = skillRating([...past, live]);
+  return { ...rated, live: true, provisional: rated.provisional };
+}
+
+function renderSkill() {
+  const rating = currentRating();
+  const whiteEl = $('skill-white');
+  const blackEl = $('skill-black');
+  skillReset.hidden = matchHistory.games.length === 0;
+  skillReset.title = `Clear the ${matchHistory.games.length} finished game(s) behind this rating`;
+
+  if (!rating) {
+    skillFill.style.width = '50%';
+    whiteEl.querySelector('.rating').textContent = '—';
+    blackEl.querySelector('.rating').textContent = '—';
+    skillSub.textContent = 'result minus luck';
+    skillNote.textContent =
+      'Once the dice start rolling, this splits the result into what the ' +
+      'dice gave and what the players earned.';
+    return;
+  }
+
+  const w = rating.white.rating;
+  skillFill.style.width = `${(w * 100).toFixed(1)}%`;
+  whiteEl.querySelector('.rating').textContent = w.toFixed(2);
+  blackEl.querySelector('.rating').textContent = rating.black.rating.toFixed(2);
+
+  const leader = w >= 0.5 ? 'white' : 'black';
+  const played = matchHistory.games.length;
+  skillSub.textContent = rating.live
+    ? played
+      ? `${played} done + this one`
+      : 'so far this game'
+    : `${rating.games} game${rating.games > 1 ? 's' : ''}`;
+
+  const edge = rating.edgePerGame;
+  const who = leader === 'white' ? 'White' : 'Black';
+  const label = rating[leader].label;
+  const magnitude = Math.abs(edge).toFixed(2);
+
+  let note = `<b>${who}: ${label}</b> — ${magnitude} point${
+    magnitude === '1.00' ? '' : 's'
+  } of the ${rating.live ? 'position' : 'result'} the dice do not explain`;
+  note += rating.games > 1 ? `, per game.` : '.';
+  if (rating.provisional) {
+    note +=
+      rating.games < 2
+        ? ` A single game is mostly noise; this settles over about ${CONFIDENT_GAMES}.`
+        : ` Still settling — ${rating.games} of about ${CONFIDENT_GAMES} games.`;
+  }
+  skillNote.innerHTML = note;
+}
+
 /* ------------------------------------------------------ best play */
 
 function renderBest() {
@@ -1134,6 +1231,7 @@ function sync() {
   } else {
     dieFilter = null;
   }
+  bankFinishedGame();
   save();
   render();
   focusDiceEntry();
@@ -1281,10 +1379,23 @@ newGameBtn.addEventListener('click', () => {
   }
   engineToken += 1;
   busy = false;
+  bankFinishedGame(); // in case it ended and was never rendered
+  gameBanked = false;
   state = newGame();
   luckLog = emptyLuckLog();
   analysisCache = { key: null, data: null };
+  bestCache = { key: null, data: null };
   lastMove = null;
+  sync();
+});
+
+skillReset.addEventListener('click', () => {
+  if (!matchHistory.games.length) return;
+  if (!window.confirm('Clear the finished games behind the skill rating?')) return;
+  matchHistory = { games: [] };
+  // The finished game on screen belongs to the run just cleared, so it does
+  // not come straight back as game one.
+  gameBanked = true;
   sync();
 });
 
@@ -1313,6 +1424,17 @@ copyBtn.addEventListener('click', async () => {
       `${playerName(state.result.winner)} wins ${state.result.points} point${
         state.result.points > 1 ? 's' : ''
       } (${state.result.type})`,
+    );
+  }
+  const rating = currentRating();
+  if (rating) {
+    lines.push(
+      `Skill (result minus luck, ${rating.games} game${
+        rating.games > 1 ? 's' : ''
+      }${rating.live ? ' incl. one in progress' : ''}): ` +
+        `White ${rating.white.rating.toFixed(2)}, Black ${rating.black.rating.toFixed(2)} ` +
+        `· edge ${fmtEq(rating.edgePerGame)} per game to ` +
+        `${rating.edgePerGame >= 0 ? 'White' : 'Black'}`,
     );
   }
   const text = lines.join('\n') || 'No moves yet.';
@@ -1357,6 +1479,8 @@ function save() {
         plays: enginePlays,
         dice: diceMode,
         best: showBest,
+        match: matchHistory,
+        banked: gameBanked,
       }),
     );
   } catch {
@@ -1390,6 +1514,18 @@ function load() {
       }
       if (saved.dice === 'manual' || saved.dice === 'random') diceMode = saved.dice;
       if (typeof saved.best === 'boolean') showBest = saved.best;
+      if (saved.match && Array.isArray(saved.match.games)) {
+        matchHistory = {
+          games: saved.match.games.filter(
+            (g) =>
+              g &&
+              Number.isFinite(g.result) &&
+              Number.isFinite(g.whiteLuck) &&
+              Number.isFinite(g.blackLuck),
+          ),
+        };
+      }
+      if (typeof saved.banked === 'boolean') gameBanked = saved.banked;
     } else if (validState(saved)) {
       state = saved; // pre-analysis save format
     }
