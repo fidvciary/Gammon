@@ -12,6 +12,8 @@ import {
   newGame,
   roll,
   rollOpening,
+  startTurn,
+  parseRoll,
   legalMoves,
   legalPlays,
   applyMove,
@@ -64,12 +66,19 @@ const evalbarNum = $('evalbar-num');
 const enginePlaysEl = $('engine-plays');
 const hintBtn = $('hint-btn');
 const hintOut = $('hint-out');
+const controlsEl = $('controls');
+const diceModeEl = $('dice-mode');
+const diceEntryEl = $('dice-entry');
+const diceInput = $('dice-input');
+const diceSetBtn = $('dice-set');
+const diceNoteEl = $('dice-note');
 
 const STORAGE_KEY = 'gammon.state.v1';
 
 let state;
 let luckLog;
 let enginePlays = 'off'; // off | white | black | both
+let diceMode = 'random'; // random | manual
 let selected = null;
 let dieFilter = null;
 let lastMove = null;
@@ -241,6 +250,61 @@ function doRoll() {
   lastMove = null;
   state = state.phase === 'opening' ? rollOpening(state) : roll(state);
   recordRollLuck(analysis);
+}
+
+/* --------------------------------------------------- manual dice entry */
+
+/** A mis-typed roll can be replaced until the first checker moves. */
+function canReplaceRoll() {
+  return state.phase === 'move' && state.played.length === 0;
+}
+
+function wantsDice() {
+  return state.phase === 'opening' || state.phase === 'roll';
+}
+
+function dropLuckFor(turn) {
+  luckLog = { entries: luckLog.entries.filter((e) => e.turn !== turn) };
+}
+
+/**
+ * Play a roll the user supplied. During the opening the pair is read as
+ * [White's die, Black's die] and the higher one starts.
+ */
+function submitRoll(dice) {
+  if (busy) return false;
+  if (!wantsDice() && !canReplaceRoll()) return false;
+
+  lastMove = null;
+  if (state.phase === 'opening') {
+    const analysis = getAnalysis();
+    state = rollOpening(state, Math.random, dice);
+    recordRollLuck(analysis);
+  } else {
+    // Replacing: forget the roll we priced before overwriting it.
+    if (state.phase === 'move') dropLuckFor(state.history.length + 1);
+    const analysis = getAnalysis();
+    state = startTurn(state, dice);
+    recordRollLuck(analysis);
+  }
+  diceInput.value = '';
+  diceInput.classList.remove('bad');
+  sync();
+  return true;
+}
+
+function trySubmitInput({ quiet = false } = {}) {
+  const dice = parseRoll(diceInput.value);
+  if (!dice) {
+    if (!quiet && diceInput.value.trim()) {
+      diceInput.classList.add('bad');
+      diceNoteEl.textContent = 'Two dice, each 1–6 — for example 53.';
+      diceNoteEl.classList.add('bad');
+      diceNoteEl.hidden = false;
+    }
+    return false;
+  }
+  return submitRoll(dice);
 }
 
 /* --------------------------------------------------------------- render */
@@ -459,8 +523,13 @@ function renderStatus() {
 
 function statusHtml() {
   if (state.phase === 'opening') {
-    return state.openingRoll
-      ? `Both rolled ${state.openingRoll[WHITE]} — roll again.`
+    if (state.openingRoll) {
+      return `Both rolled ${state.openingRoll[WHITE]} — ${
+        diceMode === 'manual' ? 'enter the next pair.' : 'roll again.'
+      }`;
+    }
+    return diceMode === 'manual'
+      ? 'Enter the opening dice to see who goes first.'
       : 'Roll to see who goes first.';
   }
   if (state.phase === 'over') {
@@ -480,7 +549,11 @@ function statusHtml() {
         }. `
       : '';
 
-  if (state.phase === 'roll') return `${opening}${who} to roll.`;
+  if (state.phase === 'roll') {
+    return diceMode === 'manual'
+      ? `${opening}Enter ${playerName(state.turn)}'s roll.`
+      : `${opening}${who} to roll.`;
+  }
   if (state.playLength === 0) {
     return `${opening}${who} cannot move. Press Done to pass.`;
   }
@@ -495,10 +568,18 @@ function statusHtml() {
 
 function renderControls() {
   const engineTurn = enginePlaysTurn();
-  const canRoll =
-    !busy && !engineTurn && (state.phase === 'opening' || state.phase === 'roll');
+  const manual = diceMode === 'manual';
+  const canRoll = !busy && !engineTurn && wantsDice();
+
+  rollBtn.hidden = manual;
+  controlsEl.classList.toggle('two', manual);
   rollBtn.disabled = !canRoll;
-  rollBtn.classList.toggle('ready', canRoll);
+  rollBtn.classList.toggle('ready', canRoll && !manual);
+
+  for (const btn of diceModeEl.querySelectorAll('.seg')) {
+    btn.classList.toggle('on', btn.dataset.dice === diceMode);
+  }
+  renderDiceEntry(manual);
 
   undoBtn.disabled =
     busy || engineTurn || state.phase !== 'move' || state.played.length === 0;
@@ -512,6 +593,31 @@ function renderControls() {
   hintBtn.disabled =
     busy || engineTurn || state.phase !== 'move' || !legalMoves(state).length;
   hintOut.textContent = hintShown || '';
+}
+
+function renderDiceEntry(manual) {
+  const open = manual && !busy && (wantsDice() || canReplaceRoll());
+  diceEntryEl.hidden = !open;
+  diceSetBtn.disabled = !open;
+
+  if (!open) {
+    diceNoteEl.hidden = true;
+    diceNoteEl.classList.remove('bad');
+    return;
+  }
+  // A live error message survives until the next successful entry.
+  if (diceNoteEl.classList.contains('bad') && diceInput.value.trim()) return;
+
+  diceNoteEl.classList.remove('bad');
+  diceNoteEl.hidden = false;
+  if (state.phase === 'opening') {
+    diceNoteEl.textContent =
+      "Both opening dice, White's first — the higher one starts.";
+  } else if (state.phase === 'roll') {
+    diceNoteEl.textContent = `${playerName(state.turn)}'s two dice, or click a row in Rolls.`;
+  } else {
+    diceNoteEl.textContent = 'Enter a new roll to correct this one.';
+  }
 }
 
 function fmtEq(v, digits = 2) {
@@ -622,12 +728,26 @@ function renderRolls() {
     ...analysis.rolls.map((r) => Math.abs(r.delta)),
   );
 
+  // While transcribing, a row is a one-click way to say "this is what fell".
+  // Not during the opening: a row shows a pair, not which side threw which.
+  const pickable =
+    diceMode === 'manual' &&
+    !busy &&
+    state.phase !== 'opening' &&
+    (wantsDice() || canReplaceRoll());
+
   for (const r of analysis.rolls) {
     const li = el('li', null, rollsEl);
     if (r === analysis.median) li.classList.add('median-row');
     const isActual = actual && r.dice[0] === actual[0] && r.dice[1] === actual[1];
     if (isActual) li.classList.add('rolled');
-    li.title = `${r.dice[0]}-${r.dice[1]}: best ${r.notation} (${fmtEq(r.eq, 3)})`;
+    if (pickable) {
+      li.classList.add('pickable');
+      li.dataset.roll = `${r.dice[0]}${r.dice[1]}`;
+    }
+    li.title = pickable
+      ? `Play ${r.dice[0]}-${r.dice[1]} — best ${r.notation} (${fmtEq(r.eq, 3)})`
+      : `${r.dice[0]}-${r.dice[1]}: best ${r.notation} (${fmtEq(r.eq, 3)})`;
 
     const rank = el('span', 'rank', li);
     rank.textContent = String(r.rank);
@@ -847,7 +967,17 @@ function sync() {
   }
   save();
   render();
+  focusDiceEntry();
   scheduleEngine();
+}
+
+/** Keep the caret in the dice box while transcribing, never steal it. */
+function focusDiceEntry() {
+  if (diceEntryEl.hidden || !wantsDice()) return;
+  const active = document.activeElement;
+  if (active && active !== document.body && active !== diceInput) return;
+  diceInput.focus();
+  diceInput.select();
 }
 
 function doMove(move) {
@@ -914,6 +1044,51 @@ rollBtn.addEventListener('click', () => {
   if (rollBtn.disabled) return;
   doRoll();
   sync();
+});
+
+diceModeEl.addEventListener('click', (event) => {
+  const btn = event.target.closest('.seg');
+  if (!btn) return;
+  diceMode = btn.dataset.dice;
+  diceInput.value = '';
+  diceInput.classList.remove('bad');
+  diceNoteEl.classList.remove('bad');
+  engineToken += 1;
+  busy = false;
+  sync();
+});
+
+diceSetBtn.addEventListener('click', () => trySubmitInput());
+
+diceInput.addEventListener('input', () => {
+  // A die can only be 1-6, so anything else never makes it into the box —
+  // silence would just look like a dropped keystroke, hence the note.
+  const cleaned = diceInput.value.replace(/[^1-6\s,\-/x]/gi, '');
+  if (cleaned !== diceInput.value) {
+    diceInput.value = cleaned;
+    diceInput.classList.add('bad');
+    diceNoteEl.textContent = 'Dice run 1–6.';
+    diceNoteEl.classList.add('bad');
+    diceNoteEl.hidden = false;
+    return;
+  }
+  diceInput.classList.remove('bad');
+  diceNoteEl.classList.remove('bad');
+  // Typing the second digit is the whole gesture — don't make them hit Enter.
+  trySubmitInput({ quiet: true });
+});
+
+diceInput.addEventListener('keydown', (event) => {
+  if (event.key !== 'Enter') return;
+  event.preventDefault();
+  trySubmitInput();
+});
+
+rollsEl.addEventListener('click', (event) => {
+  const row = event.target.closest('li.pickable');
+  if (!row) return;
+  const dice = parseRoll(row.dataset.roll);
+  if (dice) submitRoll(dice);
 });
 
 undoBtn.addEventListener('click', () => {
@@ -1007,7 +1182,13 @@ function save() {
   try {
     localStorage.setItem(
       STORAGE_KEY,
-      JSON.stringify({ v: 2, state, luck: luckLog, plays: enginePlays }),
+      JSON.stringify({
+        v: 2,
+        state,
+        luck: luckLog,
+        plays: enginePlays,
+        dice: diceMode,
+      }),
     );
   } catch {
     /* private mode, quota — the game just won't survive a reload */
@@ -1038,6 +1219,7 @@ function load() {
       if (['off', 'white', 'black', 'both'].includes(saved.plays)) {
         enginePlays = saved.plays;
       }
+      if (saved.dice === 'manual' || saved.dice === 'random') diceMode = saved.dice;
     } else if (validState(saved)) {
       state = saved; // pre-analysis save format
     }
@@ -1065,6 +1247,8 @@ function enginePlaysTurn() {
 
 function scheduleEngine() {
   if (busy || !enginePlaysTurn()) return;
+  // With manual dice the engine waits for the roll to be typed in.
+  if (diceMode === 'manual' && state.phase !== 'move') return;
   const token = engineToken;
   setTimeout(() => {
     if (token === engineToken) runEngine();
@@ -1077,7 +1261,7 @@ async function runEngine() {
   busy = true;
   render();
   try {
-    if (state.phase === 'opening' || state.phase === 'roll') {
+    if (wantsDice() && diceMode !== 'manual') {
       doRoll();
       render();
       await wait(delays.roll);

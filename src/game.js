@@ -272,6 +272,19 @@ export function diceFromRoll(roll) {
   return a === b ? [a, a, a, a] : [a, b];
 }
 
+/**
+ * Read a roll out of typed text: "53", "5 3", "5-3", "5,3", "5x3".
+ * Exactly two dice, each 1-6, and nothing else in the string, or null.
+ */
+export function parseRoll(text) {
+  const trimmed = String(text ?? '').trim();
+  if (!trimmed) return null;
+  if (/[^1-6\s,\-/x]/i.test(trimmed)) return null;
+  const digits = trimmed.match(/[1-6]/g) || [];
+  if (digits.length !== 2) return null;
+  return [Number(digits[0]), Number(digits[1])];
+}
+
 /** Dice from the current roll that have not been spent yet. */
 export function diceRemaining(state) {
   if (!state.roll) return [];
@@ -357,10 +370,13 @@ export function roll(state, rng = Math.random) {
 /**
  * Decide who moves first. Each side throws one die; the higher throw plays,
  * using both dice. A tie is thrown again.
+ *
+ * `forced` supplies the two dice as [White's, Black's] instead of throwing
+ * them, for transcribing a game that happened elsewhere.
  */
-export function rollOpening(state, rng = Math.random) {
-  const white = rollDie(rng);
-  const black = rollDie(rng);
+export function rollOpening(state, rng = Math.random, forced = null) {
+  const white = forced ? forced[0] : rollDie(rng);
+  const black = forced ? forced[1] : rollDie(rng);
   const s = cloneState(state);
   s.openingRoll = { 1: white, '-1': black };
   if (white === black) return s; // tie — roll again

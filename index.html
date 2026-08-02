@@ -81,7 +81,27 @@
             <div class="dice" id="dice"></div>
             <p class="status" id="status">Roll to see who starts.</p>
 
-            <div class="controls">
+            <div class="dice-mode" id="dice-mode" role="group" aria-label="Dice source">
+              <span>Dice</span>
+              <button type="button" data-dice="random" class="seg on">Random</button>
+              <button type="button" data-dice="manual" class="seg">Manual</button>
+            </div>
+            <div class="dice-entry" id="dice-entry" hidden>
+              <input
+                type="text"
+                id="dice-input"
+                inputmode="numeric"
+                autocomplete="off"
+                spellcheck="false"
+                maxlength="5"
+                placeholder="53"
+                aria-label="Enter the roll"
+              />
+              <button type="button" class="btn" id="dice-set">Set roll</button>
+            </div>
+            <p class="dice-note" id="dice-note" hidden></p>
+
+            <div class="controls" id="controls">
               <button type="button" class="btn primary" id="roll">Roll</button>
               <button type="button" class="btn" id="undo">Undo</button>
               <button type="button" class="btn" id="done">Done</button>

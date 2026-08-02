@@ -26,6 +26,30 @@ played out as fully as the rules demand. Keys: <kbd>R</kbd> roll,
 <kbd>U</kbd> undo, <kbd>Enter</kbd> done, <kbd>H</kbd> hint,
 <kbd>Esc</kbd> deselect.
 
+Both sides are played by hand unless you hand one to the engine, so a
+pass-and-play game between two people needs no setup at all.
+
+### Entering your own rolls
+
+Switch **Dice** to **Manual** (next to the controls) to dictate the dice
+instead of throwing them — for replaying a game from a transcript or copying
+one as it happens. The Roll button gives way to an entry box:
+
+- Type the two dice and they play the moment the second digit lands — `53`,
+  or `5 3` / `5-3` / `5,3` if you prefer. No Enter needed.
+- Or click any row in the **Rolls** panel to play that roll.
+- During the opening, enter **both** dice, White's first (`53` = White threw
+  5, Black threw 3, so White starts and plays 5-3). Equal dice are a tie, and
+  it waits for the next pair, exactly as at the table.
+- Mistyped it? Enter the roll again — it is replaced as long as you have not
+  moved a checker yet, and its luck entry is rewritten rather than double
+  counted.
+- Anything that is not a die simply never enters the box.
+
+Luck and roll analysis work the same on dictated rolls, so a transcribed game
+gets the full treatment. The setting sticks across reloads. If the engine is
+playing a side, it waits for you to enter its roll and then moves.
+
 The rules engine enforces everything: bar entry before anything else, blocked
 points, hitting, doubles played four times, "play both dice if any order
 allows it", "if only one die plays it must be the higher", bear-off legality,

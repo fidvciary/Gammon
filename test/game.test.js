@@ -22,6 +22,8 @@ import {
   diceRemaining,
   diceFromRoll,
   rollDice,
+  rollOpening,
+  parseRoll,
   cloneState,
 } from '../src/game.js';
 import { notateMoves } from '../src/notation.js';
@@ -286,6 +288,48 @@ test('a play can be enumerated for an engine to choose from', () => {
     p.map((m) => `${m.from}/${m.to}`).sort().join(','),
   );
   assert.equal(new Set(keys).size, keys.length);
+});
+
+test('typed rolls are parsed, junk is refused', () => {
+  assert.deepEqual(parseRoll('53'), [5, 3]);
+  assert.deepEqual(parseRoll('5 3'), [5, 3]);
+  assert.deepEqual(parseRoll('5-3'), [5, 3]);
+  assert.deepEqual(parseRoll('5,3'), [5, 3]);
+  assert.deepEqual(parseRoll('5x3'), [5, 3]);
+  assert.deepEqual(parseRoll(' 66 '), [6, 6]);
+  assert.deepEqual(parseRoll('35'), [3, 5], 'order is kept as typed');
+
+  for (const bad of ['', '5', '533', '70', '0', '5-7', 'ab', '5 3 1', null, undefined]) {
+    assert.equal(parseRoll(bad), null, `refuses ${JSON.stringify(bad)}`);
+  }
+});
+
+test('an opening roll can be dictated instead of thrown', () => {
+  // [White's die, Black's die] — the higher one starts and plays both.
+  const white = rollOpening(newGame(), null, [5, 3]);
+  assert.equal(white.turn, WHITE);
+  assert.deepEqual(white.roll, [5, 3]);
+  assert.equal(white.phase, 'move');
+  assert.equal(white.playLength, 2);
+
+  const black = rollOpening(newGame(), null, [2, 6]);
+  assert.equal(black.turn, BLACK);
+  assert.deepEqual(black.roll, [2, 6]);
+  assert.equal(black.openingRoll[WHITE], 2);
+  assert.equal(black.openingRoll[BLACK], 6);
+
+  // A dictated tie stays in the opening, waiting for another pair.
+  const tie = rollOpening(newGame(), null, [4, 4]);
+  assert.equal(tie.phase, 'opening');
+  assert.equal(tie.turn, null);
+});
+
+test('a dictated roll drives an ordinary turn', () => {
+  const s = startTurn({ ...newGame(), turn: WHITE }, [6, 5]);
+  assert.deepEqual(s.roll, [6, 5]);
+  assert.equal(s.playLength, 2);
+  const after = play(s, [24, 18], [18, 13]);
+  assert.equal(notateMoves(after.played), '24/18/13');
 });
 
 test('dice land in range', () => {
